@@ -1,0 +1,526 @@
+---
+title: "78th UNGA"
+author: "Bless Nimi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning=FALSE)
+```
+
+#setting directory
+
+```{r}
+setwd("/Users/blessnimi/Desktop/78thUNGA")
+
+
+```
+
+#### Load required libraries
+
+```{r}
+library(udpipe)
+library (tidytext)
+library(dplyr)
+library(tidyr)
+library(lattice)
+library(stringi)
+library(forcats)
+library(quanteda)
+library(tm)
+library(igraph)
+library(readxl)
+library(ggplot2)
+
+# Install required packages if not already installed
+if (!require(udpipe)) {
+  install.packages("udpipe")
+}
+
+if (!require(wordcloud)) {
+  install.packages("wordcloud")
+  library(wordcloud)
+}
+
+```
+
+
+#### Reading CSV file
+```{r}
+db<- read.csv("UNGA_78_clean_corpus.csv")
+
+speeches <- read_excel("/Users/blessnimi/Desktop/78thUNGA/78UNGA(2).xlsx")
+
+```
+
+
+## 1. Manipulating Text
+
+```{r}
+#restructuring the data
+
+db_new <- unnest_tokens(tbl=db, input=Text, output=word)
+
+#creating a data frame with stop words
+
+stp_wrds<- get_stopwords(source="smart")
+
+#removing stopwords
+
+db_new <- anti_join(db_new,stp_wrds,by= "word")
+
+#sentiment analysis with bing lexicon /dictionary 
+
+bing<- get_sentiments(lexicon = "bing")
+
+#joinning the data frames
+
+db_bing <- inner_join(db_new, bing, by="word")
+
+#computing sentiment counts by Country
+
+db_bing<- count(db_bing,Country_Code, sentiment)
+
+```
+
+#### Loading the pre-trained English model
+```{r}
+ud_model <- udpipe_download_model(language = "english", model_dir = "path/to/model", overwrite = FALSE)
+ud_model <- udpipe_load_model(ud_model$file_model)
+
+# Tokenizing and annotating the text
+annotated_texts <- udpipe_annotate(ud_model, x = db$Cleaned_Text)
+# Extracting part-of-speech tags
+pos_tags <- as.data.frame(annotated_texts)
+```
+
+#### Creating and merging data frames
+
+```{r}
+# db being an existing data frame, creating a column called doc_id
+db$doc_id <- paste0("doc", 1:nrow(db))
+
+
+# Merging based on doc_id
+merged_df <- left_join(db, pos_tags, by = "doc_id")
+```
+
+
+
+#### Creating a mapping of Country_Code to full names
+
+```{r}
+country_mapping <- c(
+  "ao" = "Angola",
+  "bw" = "Botswana",
+  "cv" = "Cape Verde",
+  "eg" = "Egypt",
+  "er" = "Eritrea",
+  "et" = "Ethiopia",
+  "gm" = "Gambia",
+  "gh" = "Ghana",
+  "gw" = "Guinea-Bissau",
+  "ke" = "Kenya",
+  "lr" = "Liberia",
+  "ls" = "Lesotho",
+  "mu" = "Mauritius",
+  "mw" = "Malawi",
+  "mz" = "Mozambique",
+  "na" = "Namibia",
+  "ng" = "Nigeria",
+  "rw" = "Rwanda",
+  "sl" = "Sierra Leone",
+  "sc" = "Seychelles",
+  "ss" = "South Sudan",
+  "sz" = "Swaziland",
+  "tz" = "Tanzania",
+  "ug" = "Uganda",
+  "za" = "South Africa",
+  "zw" = "Zimbabwe"
+)
+
+# Updating the Country_Code column in merged_df using the mapping
+merged_df$Country_Name <- country_mapping[merged_df$Country_Code]
+```
+###### Now, 'merged_df' has a new column 'Country_Name' with the full names of the African countries
+
+## 1.1 Frequency tokens
+
+The process begins by loading the speeches' clean data. The data underwent cleaning, stemming, lemmatization, and categorization using the Universal Part-of-Speech (UPOS) system with the assistance of the udpipe R package.
+
+```{r}
+
+# Convert 'Tokens' to a data frame with one row per word
+word_data <- speeches %>%
+  unnest_tokens(word, Cleaned_Text)
+
+# Calculate word count per country
+word_count_per_country <- word_data %>%
+  count( Country_code, word, sort = TRUE) %>%
+  group_by( Country_code) %>%
+  summarise(Sentences = n(), Words = sum(n))
+
+# Display the result
+print(n=26, word_count_per_country)
+
+```
+
+Based on the statistics shown in the Table 1, it is apparent that Sierra Leone exhibited the greatest frequency of sentences and words in their speech, followed by Angola, Kenya, Egypt, Gambia, Mauritius, and Mozambique. The countries of Rwanda, Eritrea, South Sudan, and Guinea-Bissau presented the shortest sentences and words in their speech, as stated in given table.
+
+### 1.2	Universal part of speech (POS) tag
+
+For a comprehensive list of the parts of speech (POS) tags and their corresponding definitions, please refer to this resource [here](https://universaldependencies.org/u/pos/index.html). The provided code examines the distribution of each category independently.
+
+```{r}
+pos_counts <- merged_df %>%
+  group_by(Country_Name) %>%
+  summarise(
+    SpeechLength = n(),
+    NOUN = sum(upos == "NOUN"),
+    VERB = sum(upos == "VERB"),
+    ADJ = sum(upos == "ADJ"),
+    ADV = sum(upos == "ADV")
+  )
+
+# Reshape data for better plotting
+pos_counts_long <- tidyr::gather(pos_counts, key = "PartOfSpeech", value = "Count", 
+                                 -Country_Name, -SpeechLength)
+
+# Plot
+ggplot(pos_counts_long, aes(x =Count , y = PartOfSpeech, fill = PartOfSpeech)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~Country_Name, scales = "free") +
+  labs(title = "Part of Speech Distribution by Country",
+       x = "Part of Speech",
+       y = "Count") +
+  theme_minimal()+
+  guides(fill = FALSE) # Remove legend
+```
+
+From figure 1.1, it is evident that Sierra Leone possesses the longest speech, surpassing all other countries in this regard. Subsequently, Figure 1.1 also illustrates the frequency distribution of each UPOS type.  Most of the speeches primarily comprise of nouns, adverbs, verbs, and adjectives. 
+
+### Filter for NOUNs only
+
+```{r}
+noun_counts <- merged_df %>%
+  filter(upos == "NOUN") %>%
+  group_by(Country_Name) %>%
+  count(term = lemma, sort = TRUE) %>%
+  top_n(6, wt = n)  # Adjust 10 to the desired number of top nouns
+
+# Plot the most used nouns by country
+ggplot(noun_counts, aes(x = n, y = fct_reorder(term, n), fill = term)) +
+  geom_col() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3, color = "black") +  # Add count labels on y-axis
+  facet_wrap(~ Country_Name, scales = "free_y") +
+  labs(title = "Top Nouns by Country",
+       x = "Count",
+       y = "Noun") +
+  theme_minimal()+
+  guides(fill = FALSE)+ # Remove legend
+  theme(axis.text.y = element_text(size = 10, margin = margin(0, 0, 0, 0)))  # Adjust y-axis label size and add space between labels
+```
+
+### Filter for VERBs only
+
+```{r}
+verb_counts <- merged_df %>%
+  filter(upos == "VERB") %>%
+  group_by(Country_Name) %>%
+  count(term = lemma, sort = TRUE) %>%
+  top_n(6, wt = n)  # Adjust 10 to the desired number of top verbs
+
+# Plot the most used verbs by country with separate plots for each country
+ggplot(verb_counts, aes(x = n, y = fct_reorder(term, n), fill = term)) +
+  geom_col() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3, color = "black") +  # Add count labels on y-axis
+  facet_wrap(~ Country_Name, scales = "free_y") +
+  labs(title = "Top Verbs by Country",
+       x = "Count",
+       y = "Verb") +
+  theme_minimal() +
+  guides(fill = FALSE)  # Remove legend
+
+```
+
+### Filter for ADJECTIVEs only
+
+```{r}
+adjective_counts <- merged_df %>%
+  filter(upos == "ADJ") %>%
+  group_by(Country_Name) %>%
+  count(term = lemma, sort = TRUE) %>%
+  top_n(4, wt = n)  # Adjust 10 to the desired number of top adjectives
+
+# Plot the most used adjectives by country with separate plots for each country
+ggplot(adjective_counts, aes(x = n, y = fct_reorder(term, n), fill = term)) +
+  geom_col() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3, color = "black") +  # Add count labels on y-axis
+  facet_wrap(~ Country_Name, scales = "free_y") +
+  labs(title = "Top Adjectives by Country",
+       x = "Count",
+       y = "Adjective") +
+  theme_minimal() +
+  guides(fill = FALSE)  # Remove legend
+```
+  
+### Filter for ADVERBs only
+
+```{r}
+adverb_counts <- merged_df %>%
+  filter(upos == "ADV") %>%
+  group_by(Country_Name) %>%
+  count(term = lemma, sort = TRUE) %>%
+  top_n(4, wt = n)  # Adjust 10 to the desired number of top adverbs
+
+# Plot the most used adverbs by country with separate plots for each country
+ggplot(adverb_counts, aes(x = n, y = fct_reorder(term, n), fill = term)) +
+  geom_col() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3, color = "black") +  # Add count labels on y-axis
+  facet_wrap(~ Country_Name, scales = "free_y") +
+  labs(title = "Top Adverbs by Country",
+       x = "Count",
+       y = "Adverb") +
+  theme_minimal() +
+  guides(fill = FALSE)  # Remove legend
+```
+
+### 1.3	Summary 
+
+It is evident that Sierra Leone possesses the longest speech, surpassing all other countries in this regard. Subsequently, this sections also illustrates the frequency distribution of each UPOS type.  Most of the speeches primarily comprise of nouns, adjectives, verbs, and adverbs. Based on the depicted picture, it can be observed that most national speeches exhibit a higher frequency of nouns and adjectives, followed by verbs, and finally adverbs. For a comprehensive list of the parts of speech (POS) tags and their corresponding definitions, please refer to this resource [here](https://universaldependencies.org/u/pos/index.html).
+
+
+## 2	Visualizing Words
+
+The initial segment pertains to the frequency of words within each statement. This procedure calculates the words that exhibit the highest degree of exclusivity in a specific speech. This metric quantifies the degree of specificity exhibited by individual speeches in terms of their respective vocabularies. The second portion will incorporate a word cloud that encompasses all the aggregated statements, serving as an additional visual representation of the frequency of words used. The frequency of a word in the text is shown by its size.
+
+### 2.1	Frequent words
+
+### 2.1.1	Top most Frequent words per country 
+
+```{r}
+
+# Create a data frame with word frequencies
+word_freq <- merged_df %>%
+  group_by(Country_Name, lemma) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq)) %>%
+  group_by(Country_Name) %>%
+  top_n(10, wt = freq)
+
+# Plot the bar chart with facets
+ggplot(word_freq, aes(x = freq, y = fct_reorder(lemma, freq), fill = lemma)) +
+  geom_col() +
+  facet_wrap(~ Country_Name, scales = "free_y") +
+  labs(title = "Ten Most Frequent Words in Country Statements",
+       x = "Word",
+       y = "Frequency") +
+  theme_minimal() +
+  guides(fill = FALSE)  # Remove legend
+```
+
+
+### 2.1.2	Top most Frequent words as a whole 
+
+```{r}
+
+# Tokenize and clean the text
+mrged_df <- merged_df %>%
+  group_by(Country_Name) %>%
+  mutate(Cleaned_Text = tolower(Cleaned_Text),
+         Cleaned_Text = removePunctuation(Cleaned_Text),
+         Cleaned_Text = removeNumbers(Cleaned_Text),
+         Cleaned_Text = removeWords(Cleaned_Text, stopwords("english")),
+         Cleaned_Text = stripWhitespace(Cleaned_Text))
+
+# Create a document-term matrix
+dtm <- DocumentTermMatrix(Corpus(VectorSource(mrged_df$Cleaned_Text)))
+
+# Convert the document-term matrix to a data frame
+dtm_df <- as.data.frame(as.matrix(dtm))
+
+# Calculate word frequencies
+word_frequencies <- colSums(dtm_df)
+
+# Select the top 20 most frequent words
+top_words <- head(sort(word_frequencies, decreasing = TRUE), 20)
+
+# Create a data frame for plotting
+plot_data <- data.frame(word = names(top_words), freq = top_words)
+
+# Plot a bar graph
+ggplot(plot_data, aes(x = fct_reorder(word, freq), y = freq, fill = word)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~"", scales = "free_y", ncol = 1) +
+  labs(title = "Top 20 Most Frequent Words as a whole",
+       x = "Word",
+       y = "Frequency") +
+  theme_minimal() +
+  guides(fill = FALSE)  # Remove legend
+
+```
+
+Upon analyzing the top 20 most frequent words, it becomes evident that the words "nations," "global," "development," "word," "peace," "president," "united," and "climate" hold the highest frequency. However, the presence of these terms in isolation provides minimal assistance or guidance since they lack contextual information.
+
+### 2.2	word could
+
+```{r}
+
+# Wordcloud
+merged_df %>%
+  count(lemma, sort = TRUE) %>%
+  filter(nchar(lemma) <= 10) %>%
+  with(wordcloud(words = lemma, freq = n, max.words = 200, random.order = FALSE,
+                 rot.per = 0.35, colors = brewer.pal(8, "Dark2")))
+
+
+```
+
+
+### 2.3	Summary
+
+To summarize, the examination of word frequency, frequency statistics in the initial part yielded significant findings regarding the predominant usage of words in individual speeches. Nevertheless, it became apparent that specific terms acquired value alone when used in conjunction with others. To tackle this issue, the subsequent phase of the study placed emphasis on the identification and extraction of significant keyword combinations, recognizing the significance of contextual factors in facilitating a thorough comprehension of the claims. This methodology enriches the comprehensiveness of our analysis by encompassing subtle nuances that may not be readily discernible through the sole utilization of isolated word frequency metrics.
+
+
+## 3	Key word Identification
+
+Frequency statistics of words are revealing, but one may find words which only make sense in combination with other words. Hence the goal of finding and extracting keywords which are a combination of words. The udpipe R package provides three method to identify keywords in text :
+
+    o	RAKE (Rapid Automatic Keyword Extraction)
+    o	Collocation ordering using Pointwise Mutual Information
+    o	Parts of Speech phrase sequence detection
+    
+Both RAKE and PoS techniques are used to generate rankings of common keywords across all combined speeches. Using different algorithms, for the same purpose, are a useful ways of testing if different models perform in an expected, comparable way:
+
+
+### 3.1	Using Rake method
+
+```{r}
+
+stats <- keywords_rake(mrged_df, term = "lemma", group = "Country_Code", 
+                       relevant = mrged_df$upos %in% c("NOUN", "ADJ"))
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ rake, data = head(subset(stats, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by RAKE", 
+         xlab = "Rake")
+```
+
+The RAKE algorithm was employed to identify the prevailing keywords, which encompassed terms such as "lady" and "gentlemen," "United Nations," "climate change," "sustainable development," "international law," "global community," and "climate summit."
+
+### 3.2	Using Pointwise Mutual Information Collocations
+
+```{r}
+mrged_df$word <- tolower(mrged_df$token)
+stats <- keywords_collocation(x = mrged_df, term = "word", group = "doc_id")
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ pmi, data = head(subset(stats, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by PMI Collocation", 
+         xlab = "PMI (Pointwise Mutual Information)")
+
+```
+
+Utilizing the PMI (Pointwise Mutual Information) framework, the prevailing keywords identified encompass the United Nations, the President, sustainable development, the General Assembly, climate change, the Security Council, sustainable development goals, development goals, and peace security.
+
+
+### 3.3	Using POS method (noun phrases / verb phrases)
+
+```{r}
+
+mrged_df$phrase_tag <- as_phrasemachine(mrged_df$upos, type = "upos")
+stats <- keywords_phrases(x = mrged_df$phrase_tag, term = tolower(mrged_df$token), 
+                          pattern = "(A|N)*N(P+D*(A|N)*N)*", 
+                          is_regex = TRUE, detailed = FALSE)
+stats <- subset(stats, ngram > 1 & freq > 3)
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ freq, data = head(stats, 20), col = "cadetblue", 
+         main = "Keywords - simple noun phrases", xlab = "Frequency")
+
+```
+
+
+The results obtained with the Part-of-Speech (PoS) method exhibit similarities with those obtained through the Pointwise Mutual Information (PMI) method. The most frequently occurring terms identified are "United Nations," "Mr. President," "sustainable development," "General Assembly," "climate change," "Security Council," "sustainable development goals," "development goals," and "peace security."
+
+## 4	Analysing n-grams
+
+An n-gram refers to a consecutive sequence of n words extracted from a given text. For instance, a bigram is a combination of two words, where the value of n is equal to 2. This analysis provides an initial examination of the occurrence frequencies of the most commonly observed bigram (n=2) and trigram (n=3).
+
+
+### 4.1	Nouns / adjectives used in same sentence
+
+```{r}
+cooc <- cooccurrence(x = subset(mrged_df, upos %in% c("NOUN", "ADJ")), 
+                     term = "lemma", 
+                     group = c("doc_id", "paragraph_id", "sentence_id"))
+library(ggraph)
+library(ggplot2)
+wordnetwork <- head(cooc, 30)
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link(aes(width = cooc, edge_alpha = cooc), edge_colour = "pink") +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial Narrow") +
+  theme(legend.position = "none") +
+  labs(title = "Cooccurrences within sentence", subtitle = "Nouns & Adjective")
+
+```
+
+### 4.2	Nouns / adjectives which follow one another
+
+```{r}
+cooc <- cooccurrence(mrged_df$lemma, relevant = mrged_df$upos %in% c("NOUN", "ADJ"), skipgram = 1)
+
+library(ggraph)
+library(ggplot2)
+wordnetwork <- head(cooc, 60)
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link(aes(width = cooc, edge_alpha = cooc)) +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial Narrow") +
+  labs(title = "Words following one another", subtitle = "Nouns & Adjective")
+```
+
+### 4.3	Summary
+In contrast to examining individual characteristic words, the analysis now shifts focus to characteristic n-grams per document. This approach visualizes combinations of words that are most representative of each country's statement. The resulting network graph illustrates common co-occurrences, reaffirming findings from previous analyses (RAKE, PMI, PoS). Notably, terms like 'President,' 'Sustainable development,' 'Progress,' 'Prosperity,' 'Peace,' 'The government,' 'Global solidarity,' and variations of 'United Nation' consistently emerge. This aligns with the earlier frequency analysis, highlighting the persistence of key thematic elements across different analytical perspectives.
+
+
+## 5	Sentiment Analysis
+
+From this analysis we can tell the sentiment of each speech as delivered by each country.
+
+```{r}
+
+# Update the Country_Code column in merged_df using the mapping
+db_bing$Country_Name <- country_mapping[db_bing$Country_Code]
+
+ggplot(db_bing, aes(x = n, y = fct_reorder(sentiment, n), fill = sentiment)) +
+  geom_col() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3, color = "black") +  # Add count labels on y-axis
+  facet_wrap(~ Country_Name, scales = "free_y") +
+  labs(title = "Country speech sentiment",
+       x = "Count",
+       y = "Sentiment") +
+  theme_minimal() +
+  guides(fill = FALSE)  # Remove legend
+
+
+```
+
+Upon observation of the aforementioned figure, it becomes evident that the speeches, on average, had a favorable emotion. Examining Eritrea's speech is of significant importance, as it stands as the sole speech expressing a negative viewpoint.
+
+
+
+
+```{r}
+
+
+
+
+
+
+
+
+```
